@@ -8,10 +8,11 @@ These example works here are intended to implement the book "CUDA by Example" by
 #include <device_launch_parameters.h>
 
 #include <Windows.h>
+#include <chrono>
 
 using namespace std;
 
-#define N 10
+#define N 10000
 
 // Function prototypes
 bool isKeyPressed(unsigned timeout_ms);
@@ -19,8 +20,14 @@ void printCudaDeviceProperties();
 
 __global__ void add(int* a, int* b, int* c);
 
+/* ----------MAIN--------- */
 int main(void) {
+	// Program start
 	
+	// start timer
+	auto start = chrono::high_resolution_clock::now();
+
+
 	// Print the Cuda device properties
 	printCudaDeviceProperties();
 
@@ -33,10 +40,10 @@ int main(void) {
 	cudaMalloc((void**) &dev_c, N * sizeof(int));
 
 
-	// Fİll the arrays a and b
+	// Fill the arrays a and b
 	for (int i = 0; i < N; i++) {
 		a[i] = 2-i;
-		b[i] = i * i * i;
+		b[i] = i * i;
 	}
 
 	// Copy the arrays to device
@@ -44,23 +51,31 @@ int main(void) {
 	cudaMemcpy(dev_b, b, N * sizeof(int), cudaMemcpyHostToDevice);
 
 
-	add<<<N, 1>>>(dev_a, dev_b, dev_c);
+	//add<<<1, 1>>>(dev_a, dev_b, dev_c); // No parallelism?
+	//add<<<N, 1>>>(dev_a, dev_b, dev_c); // Use N blocks, 1 thread per block
+	//add<<<1, N>>>(dev_a, dev_b, dev_c); // Use 1 block, N threads per block
+	add<<<(N + 127)/128, 128 >>> (dev_a, dev_b, dev_c); // Use ceil(N/128) blocks, 128 threads per block
 
 
 	// Copy the result back to host
 	cudaMemcpy(c, dev_c, N * sizeof(int), cudaMemcpyDeviceToHost);
 
 
-	// Print the result
-	for (int i = 0; i < N; i++) {
-		printf("a[%d]:%d + b[%d]:%d = c[%d]:%d\n", i, a[i], i, b[i], i, c[i]);
-	}
+	// Print the result , commented out bc it takes too long to print.
+	//for (int i = 0; i < N; i++) {
+	//	printf("a[%d]:%d + b[%d]:%d = c[%d]:%d\n", i, a[i], i, b[i], i, c[i]);
+	//}
 
 	// Free the memory
 	cudaFree(dev_a);
 	cudaFree(dev_b);
 	cudaFree(dev_c);
 
+
+	// end timer
+	auto end = chrono::high_resolution_clock::now();
+	chrono::duration<double> elapsed = end - start;
+	printf("Time taken: %f seconds\n", elapsed.count());
 
 	// Program end
 	printf("Press any key to escape...");
@@ -70,11 +85,14 @@ int main(void) {
 }
 
 
-// Kernel function add two arrays
+// Kernel function to add two arrays
 __global__ void add(int* a, int* b, int* c) {
-	int tid = blockIdx.x;
-	if (tid < N) c[tid] = a[tid] + b[tid];
-
+	int tid = threadIdx.x + blockIdx.x * blockDim.x;
+	while (tid < N) {
+		c[tid] = a[tid] + b[tid];
+		tid += blockDim.x * gridDim.x;
+	}
+	printf("Thread %d finished\n", tid);
 }
 
 // Check if a key is pressed, with a default timeout of 0 ms. 
